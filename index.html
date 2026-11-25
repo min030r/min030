@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>농구 슛 게임</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 16px; font-family: system-ui, -apple-system, "Malgun Gothic", sans-serif;
+    background: linear-gradient(145deg, #18233d, #263e62); color: #fff;
+    touch-action: none;
+  }
+  .game { width: min(920px, 100%); text-align: center; }
+  h1 { margin: 0 0 8px; font-size: clamp(25px, 5vw, 38px); }
+  .hint { margin: 0 0 14px; color: #dce8ff; font-size: clamp(13px, 2.5vw, 16px); }
+  .hud { display: flex; justify-content: center; gap: 12px; margin: 0 auto 12px; }
+  .scorebox { background: #101a2c; border: 1px solid #526b91; border-radius: 14px; padding: 9px 24px; min-width: 125px; }
+  .scorebox span { display: block; color: #b9c9e4; font-size: 12px; }
+  .scorebox strong { font-size: 27px; color: #ffd166; }
+  .court-wrap { overflow: hidden; border: 4px solid #f4d2a0; border-radius: 18px; box-shadow: 0 16px 35px #080f1e88; background: #d98b48; }
+  canvas { display: block; width: 100%; height: auto; aspect-ratio: 8 / 5; touch-action: none; }
+  .controls { display: flex; justify-content: center; gap: 10px; margin-top: 14px; }
+  button { border: 0; border-radius: 999px; padding: 12px 25px; font-size: 16px; font-weight: 800; cursor: pointer; background: #ffd166; color: #29202a; }
+  button:active { transform: scale(.97); }
+  button:disabled { opacity: .45; cursor: default; }
+  #message { min-height: 26px; margin-top: 10px; color: #fff0c2; font-weight: 700; }
+  @media (max-width: 480px) {
+    body { padding: 10px; align-items: flex-start; }
+    .game { margin-top: 8px; }
+    .scorebox { min-width: 110px; padding: 7px 15px; }
+    button { padding: 11px 20px; }
+  }
+</style>
+</head>
+<body>
+<main class="game">
+  <h1>🏀 농구 슛 게임</h1>
+  <p class="hint">공을 누른 채 골대 반대 방향으로 당겼다가 놓아 슛하세요!</p>
+  <div class="hud">
+    <div class="scorebox"><span>현재 점수</span><strong id="score">0</strong></div>
+    <div class="scorebox"><span>목표 점수</span><strong>30</strong></div>
+  </div>
+  <div class="court-wrap"><canvas id="court" width="800" height="500" aria-label="농구 게임 화면"></canvas></div>
+  <div class="controls"><button id="replay" disabled>다시 하기</button></div>
+  <div id="message">공을 드래그해서 슛을 시작하세요!</div>
+</main>
+<script>
+(() => {
+  const canvas = document.getElementById('court');
+  const ctx = canvas.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const messageEl = document.getElementById('message');
+  const replayBtn = document.getElementById('replay');
+
+  const W = 800, H = 500, hoop = { x: 650, y: 190, left: 612, right: 690 };
+  const start = { x: 145, y: 410 };
+  let ball, score = 0, dragging = false, dragPoint = null, gameOver = false;
+  let scoredThisShot = false, shotCount = 0, lastTime = 0;
+
+  function resetBall() {
+    ball = { x: start.x, y: start.y, vx: 0, vy: 0, r: 19, moving: false, trail: [] };
+    scoredThisShot = false;
+  }
+  function resetGame() {
+    score = 0; shotCount = 0; gameOver = false; dragging = false; dragPoint = null;
+    scoreEl.textContent = score; replayBtn.disabled = true;
+    messageEl.textContent = '공을 드래그해서 슛을 시작하세요!';
+    resetBall(); draw();
+  }
+  function pointerPos(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: (e.clientX-r.left)*W/r.width, y: (e.clientY-r.top)*H/r.height };
+  }
+  function down(e) {
+    if (gameOver || ball.moving) return;
+    const p = pointerPos(e);
+    if (Math.hypot(p.x-ball.x, p.y-ball.y) < 55) {
+      dragging = true; dragPoint = p; canvas.setPointerCapture?.(e.pointerId);
+    }
+  }
+  function move(e) { if (dragging) { dragPoint = pointerPos(e); draw(); } }
+  function up(e) {
+    if (!dragging) return;
+    const p = pointerPos(e), dx = ball.x-p.x, dy = ball.y-p.y;
+    const power = Math.min(19, Math.hypot(dx,dy)*0.105);
+    if (power > 1.3) {
+      ball.vx = Math.max(3, Math.min(17, dx*0.105));
+      ball.vy = Math.max(-17, Math.min(2, dy*0.105));
+      ball.moving = true; shotCount++;
+      messageEl.textContent = '슛! 골대를 향해 날아갑니다!';
+    }
+    dragging = false; dragPoint = null; draw();
+  }
+  canvas.addEventListener('pointerdown', down);
+  canvas.addEventListener('pointermove', move);
+  canvas.addEventListener('pointerup', up);
+  canvas.addEventListener('pointercancel', up);
+
+  function circle(x,y,r,color) {
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fillStyle=color; ctx.fill();
+  }
+  function drawCourt() {
+    const g = ctx.createLinearGradient(0,0,0,H);
+    g.addColorStop(0,'#e9a65e'); g.addColorStop(1,'#c97839');
+    ctx.fillStyle=g; ctx.fillRect(0,0,W,H);
+    ctx.strokeStyle='rgba(255,245,220,.65)'; ctx.lineWidth=4;
+    ctx.strokeRect(20,20,W-40,H-40);
+    ctx.beginPath(); ctx.arc(400,260,75,0,Math.PI*2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(400,20); ctx.lineTo(400,480); ctx.stroke();
+    // backboard, hoop and net
+    ctx.fillStyle='#f7f7f7'; ctx.fillRect(700,115,12,115);
+    ctx.strokeStyle='#fff'; ctx.lineWidth=5; ctx.strokeRect(680,145,20,38);
+    ctx.strokeStyle='#e34b35'; ctx.lineWidth=8;
+    ctx.beginPath(); ctx.moveTo(hoop.left,hoop.y); ctx.lineTo(hoop.right,hoop.y); ctx.stroke();
+    ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=2;
+    for(let i=0;i<=6;i++) {
+      const x=hoop.left+i*(hoop.right-hoop.left)/6;
+      ctx.beginPath(); ctx.moveTo(x,hoop.y+3); ctx.lineTo(hoop.x+(x-hoop.x)*.48,hoop.y+55); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(hoop.left,hoop.y+3); ctx.lineTo(hoop.x,hoop.y+55); ctx.lineTo(hoop.right,hoop.y+3); ctx.stroke();
+    // floor
+    ctx.fillStyle='rgba(104,48,20,.15)'; ctx.fillRect(0,465,W,35);
+  }
+  function drawBall() {
+    ball.trail.forEach((p,i)=>circle(p.x,p.y,Math.max(2,7-i),`rgba(255,245,220,${.18-i*.025})`));
+    const grad=ctx.createRadialGradient(ball.x-7,ball.y-8,3,ball.x,ball.y,ball.r);
+    grad.addColorStop(0,'#ffb04b'); grad.addColorStop(1,'#b94d16');
+    circle(ball.x,ball.y,ball.r,grad);
+    ctx.save(); ctx.translate(ball.x,ball.y);
+    ctx.strokeStyle='#54270f'; ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.arc(0,0,ball.r-1,-Math.PI/2,Math.PI/2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,ball.r-1,Math.PI/2,Math.PI*1.5); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-ball.r+2,0); ctx.quadraticCurveTo(0,-8,ball.r-2,0); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-ball.r+2,0); ctx.quadraticCurveTo(0,8,ball.r-2,0); ctx.stroke();
+    ctx.restore();
+  }
+  function draw() {
+    drawCourt();
+    if (dragging && dragPoint) {
+      ctx.strokeStyle='rgba(255,255,255,.9)'; ctx.lineWidth=4; ctx.setLineDash([9,8]);
+      ctx.beginPath(); ctx.moveTo(ball.x,ball.y); ctx.lineTo(ball.x+(ball.x-dragPoint.x),ball.y+(ball.y-dragPoint.y)); ctx.stroke(); ctx.setLineDash([]);
+      circle(dragPoint.x,dragPoint.y,7,'#fff');
+    }
+    drawBall();
+    if (gameOver) {
+      ctx.fillStyle='rgba(12,20,35,.78)'; ctx.fillRect(0,0,W,H);
+      ctx.textAlign='center'; ctx.fillStyle='#ffd166'; ctx.font='bold 54px system-ui';
+      ctx.fillText('🏆  30점 달성!',W/2,H/2-8);
+      ctx.fillStyle='#fff'; ctx.font='bold 25px system-ui'; ctx.fillText('멋진 슛 실력이에요!',W/2,H/2+42);
+    }
+  }
+  function update(dt) {
+    if (!ball.moving || gameOver) return;
+    const oldX=ball.x, oldY=ball.y;
+    ball.x += ball.vx*dt; ball.y += ball.vy*dt;
+    ball.vy += 0.34*dt;
+    ball.vx *= Math.pow(.998,dt);
+    ball.trail.unshift({x:ball.x,y:ball.y}); if(ball.trail.length>7) ball.trail.pop();
+
+    // Score when the ball passes down through the hoop opening.
+    if (!scoredThisShot && oldY < hoop.y && ball.y >= hoop.y &&
+        ball.x > hoop.left+ball.r*.35 && ball.x < hoop.right-ball.r*.35 && ball.vy>0) {
+      score += 2; scoredThisShot=true; scoreEl.textContent=score;
+      messageEl.textContent = score >= 30 ? '30점 달성! 게임 성공!' : '골인! +2점';
+      if(score >= 30) { gameOver=true; replayBtn.disabled=false; }
+    }
+    // Backboard and rim give a simple bounce.
+    if (ball.x+ball.r>700 && ball.y>110 && ball.y<235 && ball.vx>0) ball.vx *= -.68;
+    if (ball.y+ball.r>465) { ball.y=465-ball.r; ball.vy *= -.55; ball.vx *= .82; }
+    if (ball.x < -50 || ball.x > W+50 || ball.y > H+80 || (Math.abs(ball.vx)<.25 && Math.abs(ball.vy)<.5 && ball.y>420)) {
+      ball.moving=false;
+      if(!gameOver) {
+        messageEl.textContent = scoredThisShot ? '좋아요! 다음 슛을 해보세요.' : '아쉽네요! 공을 다시 드래그해 슛하세요.';
+        resetBall();
+      }
+    }
+  }
+  function loop(t) {
+    const dt=Math.min(2.2,(t-lastTime)/16.67 || 1); lastTime=t;
+    update(dt); draw(); requestAnimationFrame(loop);
+  }
+  replayBtn.addEventListener('click', resetGame);
+  resetGame();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
